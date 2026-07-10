@@ -4,6 +4,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import KnowledgeGraph from "./KnowledgeGraph";
 import MathFormula from "./MathFormula";
 import {
+  LEVEL_DESCRIPTIONS,
+  UI,
+  conceptCopy,
+  domainCopy,
+  levelLabel,
+  sourceCopy,
+  sourceKindLabel,
+  trackLabel,
+  type Locale,
+  type Theme,
+} from "./i18n";
+import {
   CONCEPTS,
   DOMAINS,
   EDGES,
@@ -43,27 +55,6 @@ function getAncestors(id: string) {
   return visited;
 }
 
-const sourceKindLabels: Record<string, string> = {
-  curriculum: "課程範圍",
-  course: "大學課程",
-  standard: "標準與建議",
-  assessment: "物理教育研究",
-  textbook: "教材範圍",
-  inspiration: "架構靈感",
-  reference: "參考資料",
-  課程: "大學課程",
-  開放教科書: "教材範圍",
-  標準: "標準與建議",
-  物理教育研究: "物理教育研究",
-  實驗教學規範: "實驗教學規範",
-};
-
-const levelDescriptions = [
-  { label: "基礎", note: "測量、向量與模型" },
-  { label: "核心", note: "兩學期普通物理" },
-  { label: "進階", note: "微積分深化與近代延伸" },
-];
-
 function domainFor(concept: ConceptNode | undefined) {
   return DOMAINS.find((domain) => domain.id === concept?.domainId);
 }
@@ -77,33 +68,44 @@ export default function PhysicsAtlas() {
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [listOpen, setListOpen] = useState(false);
   const [introDismissed, setIntroDismissed] = useState(false);
+  const [locale, setLocale] = useState<Locale>("zh-Hant");
+  const [theme, setTheme] = useState<Theme>("dark");
   const searchRef = useRef<HTMLInputElement>(null);
+  const t = UI[locale];
 
   const selected = selectedId ? conceptById.get(selectedId) : undefined;
   const selectedDomain = domainFor(selected);
+  const selectedText = selected ? conceptCopy(selected, locale) : null;
+  const selectedDomainText = selectedDomain ? domainCopy(selectedDomain, locale) : null;
   const prereqEdges = selected ? directPrerequisites.get(selected.id) ?? [] : [];
   const unlockEdges = selected ? directUnlocks.get(selected.id) ?? [] : [];
   const ancestorCount = selected ? getAncestors(selected.id).size : 0;
 
   const filteredConcepts = useMemo(() => {
-    const normalized = query.trim().toLocaleLowerCase("zh-Hant");
+    const normalized = query.trim().toLocaleLowerCase(locale);
     if (!normalized) return [];
 
     return CONCEPTS.filter((concept) => {
       if (!visibleDomains.has(concept.domainId)) return false;
       const domain = domainFor(concept);
+      const localizedConcept = conceptCopy(concept, locale);
+      const localizedDomain = domain ? domainCopy(domain, locale) : null;
       const haystack = [
         concept.title,
         concept.cluster,
         concept.summary,
+        localizedConcept.title,
+        localizedConcept.cluster,
+        localizedConcept.summary,
         concept.equation,
         domain?.title ?? "",
+        localizedDomain?.title ?? "",
       ]
         .join(" ")
-        .toLocaleLowerCase("zh-Hant");
+        .toLocaleLowerCase(locale);
       return haystack.includes(normalized);
     }).slice(0, 9);
-  }, [query, visibleDomains]);
+  }, [locale, query, visibleDomains]);
 
   const selectConcept = useCallback((id: string | null) => {
     setSelectedId(id);
@@ -118,13 +120,37 @@ export default function PhysicsAtlas() {
   }, []);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const topic = params.get("topic");
-    if (topic && conceptById.has(topic)) {
-      setSelectedId(topic);
-      setIntroDismissed(true);
-    }
+    const frame = window.requestAnimationFrame(() => {
+      const params = new URLSearchParams(window.location.search);
+      const topic = params.get("topic");
+      if (topic && conceptById.has(topic)) {
+        setSelectedId(topic);
+        setIntroDismissed(true);
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, []);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const savedLocale = window.localStorage.getItem("physics-atlas-locale");
+      const savedTheme = window.localStorage.getItem("physics-atlas-theme");
+      if (savedLocale === "en" || savedLocale === "zh-Hant") setLocale(savedLocale);
+      if (savedTheme === "light" || savedTheme === "dark") {
+        setTheme(savedTheme);
+      } else if (window.matchMedia("(prefers-color-scheme: light)").matches) {
+        setTheme("light");
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.lang = locale;
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem("physics-atlas-locale", locale);
+    window.localStorage.setItem("physics-atlas-theme", theme);
+  }, [locale, theme]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -160,11 +186,15 @@ export default function PhysicsAtlas() {
     });
   };
 
-  const featured =
-    CONCEPTS.find((concept) => concept.title.includes("牛頓第二")) ?? CONCEPTS[0];
+  const featured = conceptById.get("phy-035") ?? CONCEPTS[0];
 
   return (
-    <main className={`atlas ${selected ? "atlas--selected" : ""}`}>
+    <main
+      className={`atlas ${selected ? "atlas--selected" : ""}`}
+      data-theme={theme}
+      data-locale={locale}
+      lang={locale}
+    >
       <div className="graph-stage" aria-hidden="false">
         <KnowledgeGraph
           className="knowledge-graph"
@@ -172,6 +202,8 @@ export default function PhysicsAtlas() {
           onSelect={selectConcept}
           visibleDomains={visibleDomains}
           searchQuery={query}
+          locale={locale}
+          theme={theme}
           showChrome
         />
       </div>
@@ -189,69 +221,85 @@ export default function PhysicsAtlas() {
         </button>
 
         <div className="header-actions">
-          <button type="button" className="utility-button" onClick={() => setListOpen(true)}>
-            列表檢視
+          <button
+            type="button"
+            className="preference-button preference-button--theme"
+            aria-label={theme === "dark" ? t.lightMode : t.darkMode}
+            title={theme === "dark" ? t.lightMode : t.darkMode}
+            onClick={() => setTheme((current) => current === "dark" ? "light" : "dark")}
+          >
+            <span aria-hidden="true">{theme === "dark" ? "☼" : "☾"}</span>
+            <small>{theme === "dark" ? (locale === "en" ? "LIGHT" : "亮色") : (locale === "en" ? "DARK" : "暗色")}</small>
+          </button>
+          <button
+            type="button"
+            className="preference-button preference-button--language"
+            aria-label={locale === "zh-Hant" ? t.english : t.chinese}
+            title={locale === "zh-Hant" ? t.english : t.chinese}
+            onClick={() => setLocale((current) => current === "zh-Hant" ? "en" : "zh-Hant")}
+          >
+            <span aria-hidden="true">{locale === "zh-Hant" ? "EN" : "中"}</span>
+            <small>{locale === "zh-Hant" ? "ENGLISH" : "中文"}</small>
+          </button>
+          <button type="button" className="utility-button header-list-button" onClick={() => setListOpen(true)}>
+            {t.listView}
           </button>
           <button type="button" className="utility-button" onClick={() => setSourcesOpen(true)}>
-            研究依據
+            {t.research}
           </button>
         </div>
       </header>
 
       <section className={`hero ${introDismissed ? "hero--quiet" : ""}`} aria-labelledby="hero-title">
-        <p className="eyebrow">CALCULUS-BASED GENERAL PHYSICS · 繁體中文版</p>
+        <p className="eyebrow">{t.eyebrow}</p>
         <h1 id="hero-title">
-          普通物理，
+          {t.heroLines[0]}
           <br />
-          不是章節，
+          {t.heroLines[1]}
           <br />
-          是一張<span className="hero-accent">地圖。</span>
+          <span className="hero-accent">{t.heroLines[2]}</span>
         </h1>
-        <p className="hero-lead">
-          從量綱、向量與測量開始，沿著先修關係一路走到 Maxwell 方程、相對論與量子。
-          每一點都是可評量的概念；每一條線，都說明為什麼它必須先學。
-        </p>
-        <p className="hero-note">
-          依臺大普通物理、MIT 核心課程、NIST 與物理教育研究交叉建構。內容為原創中文整理，
-          不重製教材段落或受限制的評量題目。
-        </p>
+        <p className="hero-lead">{t.lead}</p>
+        <p className="hero-note">{t.note}</p>
         <div className="hero-actions">
           <button className="primary-button" type="button" onClick={() => selectConcept(featured.id)}>
             <span aria-hidden="true">◎</span>
-            從核心概念開始
+            {t.start}
           </button>
           <button className="text-button" type="button" onClick={() => setSourcesOpen(true)}>
-            閱讀建構方法 <span aria-hidden="true">↗</span>
+            {t.method} <span aria-hidden="true">↗</span>
           </button>
         </div>
-        <div className="hero-stats" aria-label="知識圖譜統計">
-          <span><strong>{CONCEPTS.length}</strong> 個概念</span>
-          <span><strong>{EDGES.length}</strong> 條先修關係</span>
-          <span><strong>{DOMAINS.length}</strong> 個領域</span>
+        <div className="hero-stats" aria-label={t.statsLabel}>
+          <span><strong>{CONCEPTS.length}</strong> {t.concepts}</span>
+          <span><strong>{EDGES.length}</strong> {t.relations}</span>
+          <span><strong>{DOMAINS.length}</strong> {t.domains}</span>
         </div>
       </section>
 
-      <section className="search-dock" aria-label="搜尋知識圖譜">
+      <section className="search-dock" aria-label={t.searchRegion}>
         <div className="search-box">
           <span className="search-box__icon" aria-hidden="true">⌕</span>
           <input
             ref={searchRef}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜尋概念、公式或領域"
-            aria-label="搜尋概念、公式或領域"
+            placeholder={t.search}
+            aria-label={t.search}
           />
           <kbd>/</kbd>
           {query && (
-            <button type="button" onClick={() => setQuery("")} aria-label="清除搜尋">×</button>
+            <button type="button" onClick={() => setQuery("")} aria-label={t.clearSearch}>×</button>
           )}
         </div>
 
         {query && (
-          <div className="search-results" role="listbox" aria-label="搜尋結果">
+          <div className="search-results" role="listbox" aria-label={t.results}>
             {filteredConcepts.length ? (
               filteredConcepts.map((concept) => {
                 const domain = domainFor(concept);
+                const localizedConcept = conceptCopy(concept, locale);
+                const localizedDomain = domain ? domainCopy(domain, locale) : null;
                 return (
                   <button
                     type="button"
@@ -264,32 +312,33 @@ export default function PhysicsAtlas() {
                     }}
                   >
                     <span className="result-dot" style={{ background: domain?.color }} />
-                    <span><strong>{concept.title}</strong><small>{domain?.title} · {concept.cluster}</small></span>
+                    <span><strong>{localizedConcept.title}</strong><small>{localizedDomain?.title} · {localizedConcept.cluster}</small></span>
                     <span aria-hidden="true">↗</span>
                   </button>
                 );
               })
             ) : (
-              <p>找不到符合的概念。試試「能量」、「電場」或「熵」。</p>
+              <p>{t.noResults}</p>
             )}
           </div>
         )}
       </section>
 
-      <nav className="domain-legend" aria-label="依物理領域篩選">
+      <nav className="domain-legend" aria-label={t.domainFilter}>
         <div className="legend-heading">
-          <span>領域 · 點選篩選</span>
+          <span>{t.domainHeading}</span>
           <button
             type="button"
             onClick={() => setVisibleDomains(new Set(DOMAINS.map((domain) => domain.id)))}
           >
-            全部顯示
+            {t.showAll}
           </button>
         </div>
         <div className="legend-grid">
           {DOMAINS.map((domain) => {
             const active = visibleDomains.has(domain.id);
             const count = CONCEPTS.filter((concept) => concept.domainId === domain.id).length;
+            const localizedDomain = domainCopy(domain, locale);
             return (
               <button
                 key={domain.id}
@@ -299,7 +348,7 @@ export default function PhysicsAtlas() {
                 onClick={() => toggleDomain(domain.id)}
               >
                 <span className="legend-dot" style={{ background: domain.color }} />
-                <span>{domain.title}</span>
+                <span>{localizedDomain.title}</span>
                 <small>{count}</small>
               </button>
             );
@@ -307,70 +356,72 @@ export default function PhysicsAtlas() {
         </div>
       </nav>
 
-      <aside className="level-key" aria-label="圖譜縱軸說明">
+      <aside className="level-key" aria-label={t.levelKey}>
         <span className="level-key__line" aria-hidden="true" />
         <div>
-          <strong>學習進程</strong>
-          {levelDescriptions.map((level) => (
-            <p key={level.label}><b>{level.label}</b>{level.note}</p>
+          <strong>{t.learningPath}</strong>
+          {LEVEL_DESCRIPTIONS[locale].map((level) => (
+            <p key={level.level}><b>{levelLabel(level.level, locale)}</b>{level.note}</p>
           ))}
         </div>
       </aside>
 
-      {selected && selectedDomain && (
-        <aside className="concept-panel" role="dialog" aria-label={`已選概念：${selected.title}`}>
-          <button className="panel-close" type="button" onClick={() => selectConcept(null)} aria-label="關閉概念詳情">×</button>
+      {selected && selectedDomain && selectedText && selectedDomainText && (
+        <aside className="concept-panel" role="dialog" aria-label={`${t.allConcepts}: ${selectedText.title}`}>
+          <button className="panel-close" type="button" onClick={() => selectConcept(null)} aria-label={t.closeDetails}>×</button>
           <div className="panel-scroll">
             <p className="concept-kicker">
               <span style={{ background: selectedDomain.color }} />
-              {selectedDomain.title} · {selected.cluster} · {selected.level}
+              {selectedDomainText.title} · {selectedText.cluster} · {levelLabel(selected.level, locale)}
             </p>
-            <h2>{selected.title}</h2>
-            <p className="concept-summary">{selected.summary}</p>
+            <h2>{selectedText.title}</h2>
+            <p className="concept-summary">{selectedText.summary}</p>
 
             {selected.equation && (
               <div className="equation-card">
-                <span>核心關係</span>
+                <span>{t.coreRelation}</span>
                 <MathFormula latex={selected.latex} />
               </div>
             )}
 
             <div className="concept-metrics">
-              <div><strong>{ancestorCount}</strong><span>完整先修概念</span></div>
-              <div><strong>{prereqEdges.length}</strong><span>直接建立於</span></div>
-              <div><strong>{unlockEdges.length}</strong><span>直接解鎖</span></div>
+              <div><strong>{ancestorCount}</strong><span>{t.ancestors}</span></div>
+              <div><strong>{prereqEdges.length}</strong><span>{t.builtOn}</span></div>
+              <div><strong>{unlockEdges.length}</strong><span>{t.unlocks}</span></div>
             </div>
 
             <div className="track-row">
-              <span>{selected.track}</span>
-              <span>{selected.level}節點</span>
+              <span>{trackLabel(selected.track, locale)}</span>
+              <span>{levelLabel(selected.level, locale)} {t.node}</span>
             </div>
 
             <section className="evidence-block">
-              <h3>掌握證據</h3>
-              <p>{selected.evidence}</p>
+              <h3>{t.evidence}</h3>
+              <p>{selectedText.evidence}</p>
             </section>
 
             <section className="misconception-block">
-              <h3>常見迷思</h3>
-              <p>{selected.misconception}</p>
+              <h3>{t.misconception}</h3>
+              <p>{selectedText.misconception}</p>
             </section>
 
             <RelationList
-              title="直接建立於"
+              title={t.builtOn}
               edges={prereqEdges}
               target="from"
               onSelect={selectConcept}
+              locale={locale}
             />
             <RelationList
-              title="接著解鎖"
+              title={t.nextUnlocks}
               edges={unlockEdges}
               target="to"
               onSelect={selectConcept}
+              locale={locale}
             />
 
             <section className="source-tags">
-              <h3>範圍與研究依據</h3>
+              <h3>{t.sources}</h3>
               <div>
                 {selected.sourceIds.map((id) => {
                   const source = SOURCES.find((item) => item.id === id);
@@ -380,7 +431,7 @@ export default function PhysicsAtlas() {
                     </a>
                   ) : null;
                 })}
-                <button type="button" onClick={() => setSourcesOpen(true)}>全部來源</button>
+                <button type="button" onClick={() => setSourcesOpen(true)}>{t.allSources}</button>
               </div>
             </section>
           </div>
@@ -388,12 +439,13 @@ export default function PhysicsAtlas() {
       )}
 
       {sourcesOpen && (
-        <ResearchModal onClose={() => setSourcesOpen(false)} />
+        <ResearchModal locale={locale} onClose={() => setSourcesOpen(false)} />
       )}
 
       {listOpen && (
         <ConceptListModal
           onClose={() => setListOpen(false)}
+          locale={locale}
           onSelect={(id) => {
             selectConcept(id);
             setListOpen(false);
@@ -409,11 +461,13 @@ function RelationList({
   edges,
   target,
   onSelect,
+  locale,
 }: {
   title: string;
   edges: ConceptEdge[];
   target: "from" | "to";
   onSelect: (id: string) => void;
+  locale: Locale;
 }) {
   if (!edges.length) return null;
 
@@ -424,12 +478,14 @@ function RelationList({
         const concept = conceptById.get(edge[target]);
         const domain = domainFor(concept);
         if (!concept) return null;
+        const localizedConcept = conceptCopy(concept, locale);
+        const prerequisiteType = edge.type === "hard" ? UI[locale].hard : UI[locale].soft;
         return (
           <button type="button" key={edge.id} onClick={() => onSelect(concept.id)}>
             <span className="relation-dot" style={{ background: domain?.color }} />
             <span>
-              <strong>{concept.title}</strong>
-              <small>{edge.type === "hard" ? "必要先修" : "建議先修"} · {edge.reason}</small>
+              <strong>{localizedConcept.title}</strong>
+              <small>{prerequisiteType}{locale === "zh-Hant" ? ` · ${edge.reason}` : " · Conceptual support for this relationship."}</small>
             </span>
             <span aria-hidden="true">↗</span>
           </button>
@@ -439,54 +495,42 @@ function RelationList({
   );
 }
 
-function ResearchModal({ onClose }: { onClose: () => void }) {
+function ResearchModal({ locale, onClose }: { locale: Locale; onClose: () => void }) {
+  const t = UI[locale];
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => {
       if (event.target === event.currentTarget) onClose();
     }}>
       <section className="research-modal" role="dialog" aria-modal="true" aria-labelledby="research-title">
-        <button className="modal-close" type="button" onClick={onClose} aria-label="關閉研究依據">×</button>
-        <p className="eyebrow">RESEARCH &amp; PROVENANCE</p>
-        <h2 id="research-title">這張圖譜如何被建構</h2>
+        <button className="modal-close" type="button" onClick={onClose} aria-label={t.closeResearch}>×</button>
+        <p className="eyebrow">{t.researchEyebrow}</p>
+        <h2 id="research-title">{t.researchTitle}</h2>
         <div className="method-grid">
-          <article>
-            <span>01</span>
-            <h3>先定範圍，再拆概念</h3>
-            <p>以臺大普通物理與 OpenStax 三冊確認廣度，MIT 課程校準微積分深度；每個節點只表達一個可評量的學習目標。</p>
-          </article>
-          <article>
-            <span>02</span>
-            <h3>章節順序不等於先修</h3>
-            <p>硬先修表示沒有它就難以理解；軟先修則提供表徵或類比。跨領域關係由向量、能量、場與波等統一觀念串接。</p>
-          </article>
-          <article>
-            <span>03</span>
-            <h3>把迷思也納入架構</h3>
-            <p>FCI、CSEM、BEMA 等研究型評量用來找出概念瓶頸，但本站不公開重製任何受限制的正式題目或答案。</p>
-          </article>
-          <article>
-            <span>04</span>
-            <h3>共享骨架、不同深度</h3>
-            <p>代數制與微積分制共享相同物理節點；本站以「微積分主線」呈現，另把 Fourier、量子態等標成進階延伸。</p>
-          </article>
-        </div>
-
-        <div className="source-index">
-          <h3>專業來源與查核入口</h3>
-          {SOURCES.map((source) => (
-            <a key={source.id} href={source.url} target="_blank" rel="noreferrer">
-              <span>{sourceKindLabels[source.kind] ?? "參考資料"}</span>
-              <strong>{source.title}</strong>
-              <small>{source.organization} · {source.note}</small>
-              <b aria-hidden="true">↗</b>
-            </a>
+          {t.researchSteps.map(([title, body], index) => (
+            <article key={title}>
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              <h3>{title}</h3>
+              <p>{body}</p>
+            </article>
           ))}
         </div>
 
-        <p className="license-note">
-          本站的中文說明、概念分解與先修關係為獨立撰寫。視覺與資料架構受 Marble Skill Taxonomy 啟發，
-          未複製其品牌、字型、程式碼或資料記錄。外部來源連結僅用於範圍與研究查核，各自權利仍歸原作者與機構。
-        </p>
+        <div className="source-index">
+          <h3>{t.sourceIndex}</h3>
+          {SOURCES.map((source) => {
+            const localizedSource = sourceCopy(source, locale);
+            return (
+              <a key={source.id} href={source.url} target="_blank" rel="noreferrer">
+                <span>{sourceKindLabel(source.kind, locale)}</span>
+                <strong>{localizedSource.title}</strong>
+                <small>{source.organization} · {localizedSource.note}</small>
+                <b aria-hidden="true">↗</b>
+              </a>
+            );
+          })}
+        </div>
+
+        <p className="license-note">{t.license}</p>
       </section>
     </div>
   );
@@ -495,45 +539,52 @@ function ResearchModal({ onClose }: { onClose: () => void }) {
 function ConceptListModal({
   onClose,
   onSelect,
+  locale,
 }: {
   onClose: () => void;
   onSelect: (id: string) => void;
+  locale: Locale;
 }) {
   const [filter, setFilter] = useState("");
-  const normalized = filter.trim().toLocaleLowerCase("zh-Hant");
+  const normalized = filter.trim().toLocaleLowerCase(locale);
+  const t = UI[locale];
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => {
       if (event.target === event.currentTarget) onClose();
     }}>
       <section className="list-modal" role="dialog" aria-modal="true" aria-labelledby="list-title">
-        <button className="modal-close" type="button" onClick={onClose} aria-label="關閉列表檢視">×</button>
-        <p className="eyebrow">ACCESSIBLE INDEX</p>
-        <h2 id="list-title">全部概念</h2>
+        <button className="modal-close" type="button" onClick={onClose} aria-label={t.closeList}>×</button>
+        <p className="eyebrow">{t.indexEyebrow}</p>
+        <h2 id="list-title">{t.allConcepts}</h2>
         <input
           autoFocus
           value={filter}
           onChange={(event) => setFilter(event.target.value)}
-          placeholder="在 {CONCEPTS.length} 個概念中搜尋"
-          aria-label="搜尋全部概念"
+          placeholder={t.searchAll}
+          aria-label={t.searchAll}
         />
         <div className="concept-index">
           {DOMAINS.map((domain) => {
+            const localizedDomain = domainCopy(domain, locale);
             const concepts = CONCEPTS.filter((concept) =>
               concept.domainId === domain.id &&
-              (!normalized || [concept.title, concept.cluster, concept.summary].join(" ").toLocaleLowerCase("zh-Hant").includes(normalized)),
+              (!normalized || [concept.title, concept.cluster, concept.summary, conceptCopy(concept, locale).title, conceptCopy(concept, locale).cluster].join(" ").toLocaleLowerCase(locale).includes(normalized)),
             );
             if (!concepts.length) return null;
             return (
               <section key={domain.id}>
-                <h3><span style={{ background: domain.color }} />{domain.title}<small>{concepts.length}</small></h3>
+                <h3><span style={{ background: domain.color }} />{localizedDomain.title}<small>{concepts.length}</small></h3>
                 <div>
-                  {concepts.map((concept) => (
-                    <button type="button" key={concept.id} onClick={() => onSelect(concept.id)}>
-                      <strong>{concept.title}</strong>
-                      <small>{concept.cluster} · {concept.level} · {concept.track}</small>
-                    </button>
-                  ))}
+                  {concepts.map((concept) => {
+                    const localizedConcept = conceptCopy(concept, locale);
+                    return (
+                      <button type="button" key={concept.id} onClick={() => onSelect(concept.id)}>
+                        <strong>{localizedConcept.title}</strong>
+                        <small>{localizedConcept.cluster} · {levelLabel(concept.level, locale)} · {trackLabel(concept.track, locale)}</small>
+                      </button>
+                    );
+                  })}
                 </div>
               </section>
             );

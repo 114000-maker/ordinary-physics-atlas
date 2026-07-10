@@ -13,6 +13,7 @@ import {
   type WheelEvent as ReactWheelEvent,
 } from "react";
 import { createPortal } from "react-dom";
+import { conceptCopy, domainCopy, levelLabel, type Locale, type Theme } from "./i18n";
 import {
   CONCEPTS,
   DOMAINS,
@@ -36,6 +37,8 @@ export interface KnowledgeGraphProps {
   query?: string;
   className?: string;
   ariaLabel?: string;
+  locale?: Locale;
+  theme?: Theme;
   /** Optional built-in chrome for standalone use. Host pages can provide their own panels. */
   showChrome?: boolean;
   showDetails?: boolean;
@@ -106,6 +109,8 @@ interface RenderState {
   queryMatches: ReadonlySet<string>;
   hasQuery: boolean;
   hoverId: string | null;
+  locale: Locale;
+  theme: Theme;
 }
 
 const TWO_PI = Math.PI * 2;
@@ -313,13 +318,15 @@ function collectAncestry(selectedId: string | null): {
   return { nodeIds, edgeIds };
 }
 
-function normalizeSearch(value: string): string {
-  return value.trim().toLocaleLowerCase("zh-Hant");
+function normalizeSearch(value: string, locale: Locale): string {
+  return value.trim().toLocaleLowerCase(locale);
 }
 
-function matchesSearch(concept: ConceptNode, query: string): boolean {
+function matchesSearch(concept: ConceptNode, query: string, locale: Locale): boolean {
   if (!query) return true;
   const domain = DOMAIN_BY_ID.get(concept.domainId);
+  const localizedConcept = conceptCopy(concept, locale);
+  const localizedDomain = domain ? domainCopy(domain, locale) : null;
   const searchable = [
     concept.title,
     concept.cluster,
@@ -331,10 +338,15 @@ function matchesSearch(concept: ConceptNode, query: string): boolean {
     concept.level,
     domain?.title ?? "",
     domain?.subtitle ?? "",
+    localizedConcept.title,
+    localizedConcept.cluster,
+    localizedConcept.summary,
+    localizedDomain?.title ?? "",
+    localizedDomain?.subtitle ?? "",
     domain?.code ?? "",
   ]
     .join(" ")
-    .toLocaleLowerCase("zh-Hant");
+    .toLocaleLowerCase(locale);
   return searchable.includes(query);
 }
 
@@ -342,6 +354,7 @@ function drawBackground(
   context: CanvasRenderingContext2D,
   width: number,
   height: number,
+  theme: Theme,
 ): void {
   const background = context.createRadialGradient(
     width * 0.5,
@@ -351,21 +364,27 @@ function drawBackground(
     height * 0.48,
     Math.max(width, height) * 0.78,
   );
-  background.addColorStop(0, "#132638");
-  background.addColorStop(0.48, "#091522");
-  background.addColorStop(1, "#040910");
+  if (theme === "light") {
+    background.addColorStop(0, "#f7fbff");
+    background.addColorStop(0.48, "#eaf2f8");
+    background.addColorStop(1, "#dce7ef");
+  } else {
+    background.addColorStop(0, "#132638");
+    background.addColorStop(0.48, "#091522");
+    background.addColorStop(1, "#040910");
+  }
   context.fillStyle = background;
   context.fillRect(0, 0, width, height);
 
   const horizon = context.createLinearGradient(0, 0, 0, height);
-  horizon.addColorStop(0, "rgba(111, 169, 201, 0.035)");
-  horizon.addColorStop(0.58, "rgba(18, 42, 59, 0)");
-  horizon.addColorStop(1, "rgba(0, 0, 0, 0.22)");
+  horizon.addColorStop(0, theme === "light" ? "rgba(76, 124, 157, 0.07)" : "rgba(111, 169, 201, 0.035)");
+  horizon.addColorStop(0.58, theme === "light" ? "rgba(255, 255, 255, 0)" : "rgba(18, 42, 59, 0)");
+  horizon.addColorStop(1, theme === "light" ? "rgba(89, 115, 133, 0.08)" : "rgba(0, 0, 0, 0.22)");
   context.fillStyle = horizon;
   context.fillRect(0, 0, width, height);
 
   context.save();
-  context.fillStyle = "rgba(202, 225, 238, 0.14)";
+  context.fillStyle = theme === "light" ? "rgba(32, 70, 91, 0.12)" : "rgba(202, 225, 238, 0.14)";
   for (let index = 0; index < 72; index += 1) {
     const starX = ((hashString(`star-x-${index}`) % 10000) / 10000) * width;
     const starY = ((hashString(`star-y-${index}`) % 10000) / 10000) * height;
@@ -383,6 +402,8 @@ function drawConeAndAxis(
   width: number,
   height: number,
   visibleDomainIds: ReadonlySet<string>,
+  theme: Theme,
+  locale: Locale,
 ): void {
   const orderedDomains = [...DOMAINS].sort((a, b) => a.order - b.order);
   const sector = TWO_PI / Math.max(1, orderedDomains.length);
@@ -436,10 +457,10 @@ function drawConeAndAxis(
     context.lineTo(left.x, left.y);
     context.lineTo(right.x, right.y);
     context.closePath();
-    context.globalAlpha = 0.045;
+    context.globalAlpha = theme === "light" ? 0.075 : 0.045;
     context.fillStyle = wedge.domain.color;
     context.fill();
-    context.globalAlpha = 0.18;
+    context.globalAlpha = theme === "light" ? 0.28 : 0.18;
     context.strokeStyle = wedge.domain.color;
     context.lineWidth = 0.7;
     context.stroke();
@@ -467,7 +488,7 @@ function drawConeAndAxis(
     }
     context.closePath();
     context.setLineDash(level === "核心" ? [3, 5] : [1, 7]);
-    context.strokeStyle = "rgba(183, 215, 229, 0.2)";
+    context.strokeStyle = theme === "light" ? "rgba(54, 85, 102, 0.24)" : "rgba(183, 215, 229, 0.2)";
     context.lineWidth = 0.8;
     context.stroke();
     context.restore();
@@ -479,7 +500,7 @@ function drawConeAndAxis(
   context.beginPath();
   context.moveTo(axisTop.x, axisTop.y);
   context.lineTo(axisBottom.x, axisBottom.y);
-  context.strokeStyle = "rgba(218, 235, 242, 0.42)";
+  context.strokeStyle = theme === "light" ? "rgba(40, 67, 82, 0.52)" : "rgba(218, 235, 242, 0.42)";
   context.lineWidth = 1;
   context.stroke();
 
@@ -489,10 +510,10 @@ function drawConeAndAxis(
     const point = projectPoint({ x: 0, y: LEVEL_Y[level], z: 0 }, camera, width, height);
     context.beginPath();
     context.arc(point.x, point.y, 2.2, 0, TWO_PI);
-    context.fillStyle = "rgba(225, 239, 245, 0.78)";
+    context.fillStyle = theme === "light" ? "rgba(28, 51, 65, 0.82)" : "rgba(225, 239, 245, 0.78)";
     context.fill();
-    context.fillStyle = "rgba(218, 234, 241, 0.72)";
-    context.fillText(level, point.x + 9, point.y);
+    context.fillStyle = theme === "light" ? "rgba(36, 64, 80, 0.78)" : "rgba(218, 234, 241, 0.72)";
+    context.fillText(levelLabel(level, locale), point.x + 9, point.y);
   }
   context.restore();
 
@@ -514,7 +535,7 @@ function drawConeAndAxis(
     );
     context.globalAlpha = clamp((510 - label.depth) / 900, 0.3, 0.9);
     context.fillStyle = wedge.domain.color;
-    context.fillText(`${wedge.domain.code} · ${wedge.domain.title}`, label.x, label.y, 118);
+    context.fillText(`${wedge.domain.code} · ${domainCopy(wedge.domain, locale).title}`, label.x, label.y, 150);
   }
   context.restore();
 }
@@ -554,8 +575,8 @@ function drawEdge(
   context.strokeStyle = isHighlighted
     ? targetColor
     : edge.type === "hard"
-      ? "#8ca4b1"
-      : "#6e8291";
+      ? state.theme === "light" ? "#5d7480" : "#8ca4b1"
+      : state.theme === "light" ? "#81919a" : "#6e8291";
   context.lineWidth = isHighlighted ? (edge.type === "hard" ? 1.8 : 1.25) : 0.75;
   context.setLineDash(edge.type === "soft" ? [4, 5] : []);
   if (isHighlighted) {
@@ -593,11 +614,11 @@ function drawNode(
   state: RenderState,
 ): void {
   const { concept, domain } = node.positioned;
+  const localizedConcept = conceptCopy(concept, state.locale);
   const isSelected = concept.id === state.selectedId;
   const isAncestor = state.ancestorIds.has(concept.id);
   const isDirectPrerequisite = state.directPrerequisiteIds.has(concept.id);
   const isUnlock = state.directUnlockIds.has(concept.id);
-  const isRelated = isSelected || isAncestor || isUnlock;
   const isMatch = state.queryMatches.has(concept.id);
   const isHovered = state.hoverId === concept.id;
   let alpha = 0.84;
@@ -649,9 +670,9 @@ function drawNode(
 
   // Soft cast shadow gives every knowledge point a floating, tactile depth.
   context.globalAlpha = alpha * 0.72;
-  context.shadowColor = "rgba(0, 0, 0, 0.9)";
+  context.shadowColor = state.theme === "light" ? "rgba(39, 62, 75, 0.38)" : "rgba(0, 0, 0, 0.9)";
   context.shadowBlur = radius * 2.4;
-  context.fillStyle = "rgba(0,0,0,.72)";
+  context.fillStyle = state.theme === "light" ? "rgba(55,76,88,.25)" : "rgba(0,0,0,.72)";
   context.beginPath();
   context.ellipse(
     node.x + radius * 0.28,
@@ -679,7 +700,7 @@ function drawNode(
   surface.addColorStop(0.12, colorWithAlpha(domain.color, 1));
   surface.addColorStop(0.52, colorWithAlpha(domain.color, 0.88));
   surface.addColorStop(0.82, colorWithAlpha(domain.color, 0.44));
-  surface.addColorStop(1, "rgba(3,7,14,.98)");
+  surface.addColorStop(1, state.theme === "light" ? "rgba(27,48,60,.88)" : "rgba(3,7,14,.98)");
   context.globalAlpha = alpha;
   context.fillStyle = surface;
   context.beginPath();
@@ -689,7 +710,7 @@ function drawNode(
   context.shadowBlur = 0;
   context.lineWidth = isSelected ? 1.8 : highlighted ? 1.15 : 0.65;
   context.strokeStyle = highlighted
-    ? "rgba(245,250,255,.94)"
+    ? state.theme === "light" ? "rgba(25,48,60,.86)" : "rgba(245,250,255,.94)"
     : colorWithAlpha(domain.color, 0.7);
   context.stroke();
 
@@ -740,7 +761,7 @@ function drawNode(
     context.beginPath();
     context.arc(node.x, node.y, radius + 8, 0, TWO_PI);
     context.setLineDash([2, 3]);
-    context.strokeStyle = "rgba(240, 249, 252, 0.95)";
+    context.strokeStyle = state.theme === "light" ? "rgba(24, 48, 61, 0.92)" : "rgba(240, 249, 252, 0.95)";
     context.lineWidth = 1;
     context.stroke();
   }
@@ -754,13 +775,15 @@ function drawNode(
     (!state.selectedId && !state.hasQuery && node.scale > 1.45 && hashString(concept.id) % 4 === 0);
   if (showLabel) {
     context.globalAlpha = clamp(alpha + 0.1, 0, 1);
-    context.shadowColor = "#06101a";
+    context.shadowColor = state.theme === "light" ? "rgba(255,255,255,.92)" : "#06101a";
     context.shadowBlur = 5;
-    context.fillStyle = isSelected ? "#f4fbfd" : "#d8e7ed";
+    context.fillStyle = state.theme === "light"
+      ? isSelected ? "#102d3d" : "#294b5c"
+      : isSelected ? "#f4fbfd" : "#d8e7ed";
     context.font = `${isSelected ? 600 : 500} ${isSelected ? 12 : 10}px "Noto Sans TC", sans-serif`;
     context.textAlign = "center";
     context.textBaseline = "top";
-    context.fillText(concept.title, node.x, node.y + radius + 7, 136);
+    context.fillText(localizedConcept.title, node.x, node.y + radius + 7, state.locale === "en" ? 172 : 136);
   }
   context.restore();
 }
@@ -778,8 +801,8 @@ function renderScene(
   if (width <= 0 || height <= 0) return;
 
   context.clearRect(0, 0, width, height);
-  drawBackground(context, width, height);
-  drawConeAndAxis(context, camera, width, height, state.visibleDomainIds);
+  drawBackground(context, width, height, state.theme);
+  drawConeAndAxis(context, camera, width, height, state.visibleDomainIds, state.theme, state.locale);
 
   const projected = POSITIONED_CONCEPTS.filter(({ concept }) =>
     state.visibleDomainIds.has(concept.domainId),
@@ -820,10 +843,10 @@ function renderScene(
 
   if (projected.length === 0) {
     context.save();
-    context.fillStyle = "rgba(222, 237, 243, 0.72)";
+    context.fillStyle = state.theme === "light" ? "rgba(35, 61, 75, 0.72)" : "rgba(222, 237, 243, 0.72)";
     context.font = '500 14px "Noto Sans TC", sans-serif';
     context.textAlign = "center";
-    context.fillText("目前篩選下沒有可顯示的概念", width / 2, height / 2);
+    context.fillText(state.locale === "en" ? "No concepts match the current filter" : "目前篩選下沒有可顯示的概念", width / 2, height / 2);
     context.restore();
   }
 }
@@ -848,15 +871,17 @@ interface RelationListProps {
   edges: readonly ConceptEdge[];
   resolveId: (edge: ConceptEdge) => string;
   onSelect: (id: string) => void;
+  locale: Locale;
+  theme: Theme;
 }
 
-function RelationList({ title, emptyText, edges, resolveId, onSelect }: RelationListProps) {
+function RelationList({ title, emptyText, edges, resolveId, onSelect, locale, theme }: RelationListProps) {
   return (
     <section aria-label={title} style={{ marginTop: 14 }}>
       <h3
         style={{
           margin: "0 0 7px",
-          color: "rgba(222, 237, 243, 0.68)",
+          color: theme === "light" ? "rgba(39, 67, 82, 0.76)" : "rgba(222, 237, 243, 0.68)",
           fontSize: 10,
           fontWeight: 700,
           letterSpacing: "0.13em",
@@ -865,7 +890,7 @@ function RelationList({ title, emptyText, edges, resolveId, onSelect }: Relation
         {title} · {edges.length}
       </h3>
       {edges.length === 0 ? (
-        <p style={{ margin: 0, color: "rgba(215, 232, 239, 0.42)", fontSize: 12 }}>
+        <p style={{ margin: 0, color: theme === "light" ? "rgba(39, 67, 82, 0.6)" : "rgba(215, 232, 239, 0.42)", fontSize: 12 }}>
           {emptyText}
         </p>
       ) : (
@@ -884,12 +909,13 @@ function RelationList({ title, emptyText, edges, resolveId, onSelect }: Relation
             const concept = CONCEPT_BY_ID.get(id);
             if (!concept) return null;
             const domain = DOMAIN_BY_ID.get(concept.domainId);
+            const localizedConcept = conceptCopy(concept, locale);
             return (
               <li key={edge.id}>
                 <button
                   type="button"
                   onClick={() => onSelect(id)}
-                  title={edge.reason}
+                  title={locale === "en" ? (edge.type === "hard" ? "Required prerequisite" : "Recommended prerequisite") : edge.reason}
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
@@ -898,8 +924,8 @@ function RelationList({ title, emptyText, edges, resolveId, onSelect }: Relation
                     padding: "6px 8px",
                     border: `1px solid ${colorWithAlpha(domain?.color ?? "#9db7c4", 0.34)}`,
                     borderRadius: 999,
-                    background: "rgba(9, 22, 34, 0.72)",
-                    color: "#dbe9ee",
+                    background: theme === "light" ? "rgba(245, 250, 253, 0.9)" : "rgba(9, 22, 34, 0.72)",
+                    color: theme === "light" ? "#244657" : "#dbe9ee",
                     font: '500 11px/1.2 "Noto Sans TC", sans-serif',
                     cursor: "pointer",
                   }}
@@ -915,10 +941,10 @@ function RelationList({ title, emptyText, edges, resolveId, onSelect }: Relation
                     }}
                   />
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {concept.title}
+                    {localizedConcept.title}
                   </span>
                   <span style={{ color: "rgba(216, 232, 238, 0.48)", fontSize: 9 }}>
-                    {edge.type === "hard" ? "必要" : "建議"}
+                    {locale === "en" ? (edge.type === "hard" ? "REQ" : "REC") : (edge.type === "hard" ? "必要" : "建議")}
                   </span>
                 </button>
               </li>
@@ -937,7 +963,9 @@ export default function KnowledgeGraph({
   searchQuery,
   query,
   className,
-  ariaLabel = "普通物理學知識圖譜。概念由基礎、核心至進階沿垂直軸排列；箭頭由先備概念指向後續概念。",
+  ariaLabel,
+  locale = "zh-Hant",
+  theme = "dark",
   showChrome = false,
   showDetails = false,
 }: KnowledgeGraphProps) {
@@ -951,7 +979,10 @@ export default function KnowledgeGraph({
   const [zoomValue, setZoomValue] = useState(INITIAL_CAMERA.zoom);
   const [mounted, setMounted] = useState(false);
   const reducedMotion = useReducedMotion();
-  const normalizedQuery = normalizeSearch(searchQuery ?? query ?? "");
+  const normalizedQuery = normalizeSearch(searchQuery ?? query ?? "", locale);
+  const resolvedAriaLabel = ariaLabel ?? (locale === "en"
+    ? "General physics knowledge graph. Concepts rise from foundation to core and advanced; arrows point from prerequisites to later concepts."
+    : "普通物理學知識圖譜。概念由基礎、核心至進階沿垂直軸排列；箭頭由先備概念指向後續概念。");
 
   const visibleDomainIds = useMemo<ReadonlySet<string>>(() => {
     if (!visibleDomains) return new Set(DOMAINS.map((domain) => domain.id));
@@ -965,13 +996,13 @@ export default function KnowledgeGraph({
     for (const concept of CONCEPTS) {
       if (
         visibleDomainIds.has(concept.domainId) &&
-        matchesSearch(concept, normalizedQuery)
+        matchesSearch(concept, normalizedQuery, locale)
       ) {
         matches.add(concept.id);
       }
     }
     return matches;
-  }, [normalizedQuery, visibleDomainIds]);
+  }, [locale, normalizedQuery, visibleDomainIds]);
 
   const ancestry = useMemo(() => collectAncestry(selectedId), [selectedId]);
   const directPrerequisiteEdges = useMemo(
@@ -1007,9 +1038,9 @@ export default function KnowledgeGraph({
           (DOMAIN_BY_ID.get(b.domainId)?.order ?? 0);
         if (domainOrder !== 0) return domainOrder;
         const levelOrder = LEVELS.indexOf(a.level) - LEVELS.indexOf(b.level);
-        return levelOrder || a.title.localeCompare(b.title, "zh-Hant");
+        return levelOrder || conceptCopy(a, locale).title.localeCompare(conceptCopy(b, locale).title, locale);
       }),
-    [normalizedQuery, queryMatches, visibleDomainIds],
+    [locale, normalizedQuery, queryMatches, visibleDomainIds],
   );
 
   const gestureRef = useRef<GestureState>({
@@ -1023,7 +1054,10 @@ export default function KnowledgeGraph({
     pinchCenter: null,
   });
 
-  useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setMounted(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
 
   const localPointer = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -1319,6 +1353,8 @@ export default function KnowledgeGraph({
           queryMatches,
           hasQuery: Boolean(normalizedQuery),
           hoverId: hoverIdRef.current,
+          locale,
+          theme,
         },
         projectedRef,
       );
@@ -1334,10 +1370,12 @@ export default function KnowledgeGraph({
     ancestry,
     directPrerequisiteIds,
     directUnlockIds,
+    locale,
     normalizedQuery,
     queryMatches,
     reducedMotion,
     selectedId,
+    theme,
     visibleDomainIds,
   ]);
 
@@ -1362,40 +1400,46 @@ export default function KnowledgeGraph({
         minHeight: 540,
         overflow: "hidden",
         isolation: "isolate",
-        background: "#040910",
-        color: "#e3eef2",
+        background: theme === "light" ? "#eaf2f8" : "#040910",
+        color: theme === "light" ? "#173748" : "#e3eef2",
         fontFamily: '"Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif',
       }}
     >
       <p id={instructionsId} style={SR_ONLY}>
-        拖曳可旋轉，按住 Shift 或滑鼠右鍵拖曳可平移，滾輪或雙指可縮放；方向鍵旋轉，
-        加減鍵縮放，Page Up 與 Page Down 依序選擇概念，Home 重設視角，Escape 取消選取。
+        {locale === "en"
+          ? "Drag to rotate; hold Shift or right-drag to pan; use the wheel or pinch to zoom. Arrow keys rotate, plus and minus zoom, Page Up and Page Down move through concepts, Home resets the view, and Escape clears the selection."
+          : "拖曳可旋轉，按住 Shift 或滑鼠右鍵拖曳可平移，滾輪或雙指可縮放；方向鍵旋轉，加減鍵縮放，Page Up 與 Page Down 依序選擇概念，Home 重設視角，Escape 取消選取。"}
       </p>
       <label style={SR_ONLY}>
-        以清單選擇概念
+        {locale === "en" ? "Select a concept from the list" : "以清單選擇概念"}
         <select
           value={selectedId ?? ""}
           onChange={(event) => onSelect(event.currentTarget.value || null)}
         >
-          <option value="">未選取概念</option>
-          {keyboardConcepts.map((concept) => (
-            <option key={concept.id} value={concept.id}>
-              {DOMAIN_BY_ID.get(concept.domainId)?.title}／{concept.level}／{concept.title}
-            </option>
-          ))}
+          <option value="">{locale === "en" ? "No concept selected" : "未選取概念"}</option>
+          {keyboardConcepts.map((concept) => {
+            const domain = DOMAIN_BY_ID.get(concept.domainId);
+            return (
+              <option key={concept.id} value={concept.id}>
+                {domain ? domainCopy(domain, locale).title : ""}／{levelLabel(concept.level, locale)}／{conceptCopy(concept, locale).title}
+              </option>
+            );
+          })}
         </select>
       </label>
       <div aria-live="polite" style={SR_ONLY}>
         {selectedConcept
-          ? `已選取${selectedConcept.title}。共有${directPrerequisiteEdges.length}個直接先備概念，並可直接解鎖${directUnlockEdges.length}個概念。`
-          : "目前未選取概念。"}
+          ? locale === "en"
+            ? `${conceptCopy(selectedConcept, locale).title} selected, with ${directPrerequisiteEdges.length} direct prerequisites and ${directUnlockEdges.length} direct unlocks.`
+            : `已選取${selectedConcept.title}。共有${directPrerequisiteEdges.length}個直接先備概念，並可直接解鎖${directUnlockEdges.length}個概念。`
+          : locale === "en" ? "No concept is currently selected." : "目前未選取概念。"}
       </div>
 
       <canvas
         ref={canvasRef}
         tabIndex={0}
         role="application"
-        aria-label={ariaLabel}
+        aria-label={resolvedAriaLabel}
         aria-describedby={instructionsId}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -1418,22 +1462,24 @@ export default function KnowledgeGraph({
           cursor: tooltip ? "pointer" : "grab",
         }}
       >
-        普通物理學概念圖譜。請使用頁面中的概念清單瀏覽內容。
+        {locale === "en"
+          ? "General physics concept graph. Use the concept list on this page to browse the content."
+          : "普通物理學概念圖譜。請使用頁面中的概念清單瀏覽內容。"}
       </canvas>
 
       {showChrome && mounted
         ? createPortal(
           <>
           <div className={`graph-interaction-chip ${selectedId ? "is-selection-active" : ""}`} aria-hidden="true">
-            <span>拖曳旋轉</span>
+            <span>{locale === "en" ? "Drag to rotate" : "拖曳旋轉"}</span>
             <i>·</i>
-            <span>右鍵平移</span>
+            <span>{locale === "en" ? "Right-drag to pan" : "右鍵平移"}</span>
             <i>·</i>
-            <span>滾輪縮放</span>
-            {normalizedQuery ? <><i>·</i><span>{queryMatches.size} 個結果</span></> : null}
+            <span>{locale === "en" ? "Wheel to zoom" : "滾輪縮放"}</span>
+            {normalizedQuery ? <><i>·</i><span>{queryMatches.size} {locale === "en" ? "results" : "個結果"}</span></> : null}
           </div>
-          <div className={`graph-zoom-toolbar ${selectedId ? "is-selection-active" : ""}`} role="group" aria-label="圖譜縮放控制">
-            <button type="button" onClick={() => changeZoom(zoomValue * 1.14)} aria-label="放大圖譜">＋</button>
+          <div className={`graph-zoom-toolbar ${selectedId ? "is-selection-active" : ""}`} role="group" aria-label={locale === "en" ? "Graph zoom controls" : "圖譜縮放控制"}>
+            <button type="button" onClick={() => changeZoom(zoomValue * 1.14)} aria-label={locale === "en" ? "Zoom in" : "放大圖譜"}>＋</button>
             <input
               type="range"
               min="0.45"
@@ -1441,11 +1487,11 @@ export default function KnowledgeGraph({
               step="0.01"
               value={zoomValue}
               onChange={(event) => changeZoom(Number(event.currentTarget.value))}
-              aria-label="圖譜縮放比例"
+              aria-label={locale === "en" ? "Graph zoom level" : "圖譜縮放比例"}
             />
-            <button type="button" onClick={() => changeZoom(zoomValue / 1.14)} aria-label="縮小圖譜">−</button>
+            <button type="button" onClick={() => changeZoom(zoomValue / 1.14)} aria-label={locale === "en" ? "Zoom out" : "縮小圖譜"}>−</button>
             <output>{Math.round(zoomValue * 100)}%</output>
-            <button type="button" className="graph-reset-button" onClick={resetView}>重設</button>
+            <button type="button" className="graph-reset-button" onClick={resetView}>{locale === "en" ? "Reset" : "重設"}</button>
           </div>
           </>,
           document.body,
@@ -1464,7 +1510,7 @@ export default function KnowledgeGraph({
             padding: 12,
             border: `1px solid ${colorWithAlpha(tooltipDomain.color, 0.42)}`,
             borderRadius: 12,
-            background: "rgba(5, 15, 24, 0.92)",
+            background: theme === "light" ? "rgba(248, 252, 255, 0.94)" : "rgba(5, 15, 24, 0.92)",
             boxShadow: `0 12px 38px rgba(0, 0, 0, 0.38), 0 0 22px ${colorWithAlpha(tooltipDomain.color, 0.1)}`,
             backdropFilter: "blur(14px)",
             pointerEvents: "none",
@@ -1479,31 +1525,31 @@ export default function KnowledgeGraph({
               letterSpacing: "0.12em",
             }}
           >
-            {tooltipDomain.code} · {tooltipDomain.title} ／ {tooltipConcept.level}
+            {tooltipDomain.code} · {domainCopy(tooltipDomain, locale).title} ／ {levelLabel(tooltipConcept.level, locale)}
           </div>
-          <div style={{ color: "#edf7f9", fontSize: 14, fontWeight: 650 }}>
-            {tooltipConcept.title}
+          <div style={{ color: theme === "light" ? "#173748" : "#edf7f9", fontSize: 14, fontWeight: 650 }}>
+            {conceptCopy(tooltipConcept, locale).title}
           </div>
           <p
             style={{
               display: "-webkit-box",
               margin: "6px 0 0",
               overflow: "hidden",
-              color: "rgba(219, 234, 240, 0.68)",
+              color: theme === "light" ? "rgba(39, 67, 82, 0.76)" : "rgba(219, 234, 240, 0.68)",
               fontSize: 11,
               lineHeight: 1.55,
               WebkitBoxOrient: "vertical",
               WebkitLineClamp: 2,
             }}
           >
-            {tooltipConcept.summary}
+            {conceptCopy(tooltipConcept, locale).summary}
           </p>
         </div>
       ) : null}
 
       {showDetails && selectedConcept && selectedDomain ? (
         <aside
-          aria-label={`${selectedConcept.title}的概念關係`}
+          aria-label={locale === "en" ? `Concept relations for ${conceptCopy(selectedConcept, locale).title}` : `${selectedConcept.title}的概念關係`}
           style={{
             position: "absolute",
             zIndex: 4,
@@ -1515,14 +1561,14 @@ export default function KnowledgeGraph({
             padding: 16,
             border: `1px solid ${colorWithAlpha(selectedDomain.color, 0.36)}`,
             borderRadius: 16,
-            background: "rgba(5, 15, 24, 0.9)",
+            background: theme === "light" ? "rgba(248, 252, 255, 0.94)" : "rgba(5, 15, 24, 0.9)",
             boxShadow: `0 18px 60px rgba(0, 0, 0, 0.38), 0 0 32px ${colorWithAlpha(selectedDomain.color, 0.08)}`,
             backdropFilter: "blur(18px)",
           }}
         >
           <button
             type="button"
-            aria-label="取消選取"
+            aria-label={locale === "en" ? "Clear selection" : "取消選取"}
             onClick={() => onSelect(null)}
             style={{
               position: "absolute",
@@ -1533,7 +1579,7 @@ export default function KnowledgeGraph({
               border: "1px solid rgba(218, 234, 240, 0.14)",
               borderRadius: "50%",
               background: "rgba(255, 255, 255, 0.035)",
-              color: "rgba(229, 241, 245, 0.68)",
+              color: theme === "light" ? "rgba(31, 59, 73, 0.72)" : "rgba(229, 241, 245, 0.68)",
               cursor: "pointer",
               fontSize: 16,
               lineHeight: "24px",
@@ -1552,20 +1598,20 @@ export default function KnowledgeGraph({
               textTransform: "uppercase",
             }}
           >
-            {selectedDomain.code} · {selectedDomain.title} ／ {selectedConcept.level}
+            {selectedDomain.code} · {domainCopy(selectedDomain, locale).title} ／ {levelLabel(selectedConcept.level, locale)}
           </div>
-          <h2 style={{ margin: 0, color: "#f0f8fa", fontSize: 18, lineHeight: 1.35 }}>
-            {selectedConcept.title}
+          <h2 style={{ margin: 0, color: theme === "light" ? "#173748" : "#f0f8fa", fontSize: 18, lineHeight: 1.35 }}>
+            {conceptCopy(selectedConcept, locale).title}
           </h2>
           <p
             style={{
               margin: "8px 0 0",
-              color: "rgba(219, 234, 240, 0.7)",
+              color: theme === "light" ? "rgba(39, 67, 82, 0.76)" : "rgba(219, 234, 240, 0.7)",
               fontSize: 12,
               lineHeight: 1.65,
             }}
           >
-            {selectedConcept.summary}
+            {conceptCopy(selectedConcept, locale).summary}
           </p>
           {selectedConcept.equation ? (
             <code
@@ -1585,18 +1631,22 @@ export default function KnowledgeGraph({
             </code>
           ) : null}
           <RelationList
-            title="直接先備"
-            emptyText="這是此路徑的起始概念"
+            title={locale === "en" ? "DIRECT PREREQUISITES" : "直接先備"}
+            emptyText={locale === "en" ? "This is a starting concept on this path" : "這是此路徑的起始概念"}
             edges={directPrerequisiteEdges}
             resolveId={(edge) => edge.from}
             onSelect={onSelect}
+            locale={locale}
+            theme={theme}
           />
           <RelationList
-            title="可直接解鎖"
-            emptyText="目前沒有直接後續節點"
+            title={locale === "en" ? "DIRECT UNLOCKS" : "可直接解鎖"}
+            emptyText={locale === "en" ? "No direct follow-up concepts" : "目前沒有直接後續節點"}
             edges={directUnlockEdges}
             resolveId={(edge) => edge.to}
             onSelect={onSelect}
+            locale={locale}
+            theme={theme}
           />
         </aside>
       ) : null}

@@ -50,4 +50,23 @@ test("builds identical self-contained pages for offline use and GitHub Pages", a
   assert.match(pagesHtml, /<script>[\s\S]+<\/script>/);
   assert.doesNotMatch(pagesHtml, /<script[^>]+src=/i);
   assert.doesNotMatch(pagesHtml, /<link[^>]+rel=["']stylesheet["']/i);
+  assert.match(pagesHtml, /Switch to light background/);
+  assert.match(pagesHtml, /General physics/);
+});
+
+test("provides English titles for every concept and persists display preferences", async () => {
+  const [dataSource, i18nSource, pageSource] = await Promise.all([
+    readFile(new URL("../app/physics-data.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/i18n.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/PhysicsAtlas.tsx", import.meta.url), "utf8"),
+  ]);
+
+  const conceptIds = [...dataSource.matchAll(/node\("(phy-\d+)"/g)].map((match) => match[1]);
+  const translatedIds = [...i18nSource.matchAll(/"(phy-\d+)":/g)].map((match) => match[1]);
+
+  assert.equal(conceptIds.length, 185);
+  assert.deepEqual(new Set(translatedIds), new Set(conceptIds));
+  assert.match(pageSource, /physics-atlas-locale/);
+  assert.match(pageSource, /physics-atlas-theme/);
+  assert.match(pageSource, /data-theme=\{theme\}/);
 });
